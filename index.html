@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fruit Catcher</title>
+    <!-- 1. Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 2. Google Font (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <!-- 3. Tone.js for Sound Effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+
+    <style>
+        /* Use the Inter font family */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom styles for the game */
+        canvas {
+            /* background: linear-gradient(to bottom, #87CEEB, #B0E0E6); /* Sky blue gradient */
+            background-image: url('game-2.jpg'); /* <-- REPLACE THIS URL (if 'game.jpg' isn't what you want) */
+            background-size: cover; /* Makes the image cover the whole canvas */
+            background-position: center; /* Centers the image */
+            display: block;
+            border-radius: 0.5rem; /* rounded-lg */
+        }
+        /* Simple text shadow for better readability on canvas */
+        .hud-text {
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen p-4">
+
+    <!-- Game Container -->
+    <div id="game-container" class="relative w-full max-w-2xl aspect-[4/3] rounded-lg shadow-2xl overflow-hidden bg-gray-800">
+
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas" class="w-full h-full"></canvas>
+
+        <!-- In-Game HUD (Heads-Up Display) -->
+        <div id="hud" class="absolute top-4 left-4 right-4 flex justify-between items-center z-10 hidden">
+            <div class="text-white text-2xl font-bold hud-text" id="score-display">Score: 0</div>
+            <div class="text-white text-2xl font-bold hud-text" id="lives-display">❤️❤️❤️</div>
+            <div class="text-white text-2xl font-bold hud-text" id="highscore-display">High: 0</div>
+        </div>
+
+        <!-- Control Buttons -->
+        <div id="controls" class="absolute bottom-4 right-4 z-10 flex gap-2 hidden">
+            <button id="pause-button" class="bg-yellow-500 text-white w-12 h-12 rounded-full shadow-lg font-bold text-lg flex items-center justify-center hover:bg-yellow-600 transition">||</button>
+            <button id="sound-button" class="bg-blue-500 text-white w-12 h-12 rounded-full shadow-lg font-bold text-lg flex items-center justify-center hover:bg-blue-600 transition">🔊</button>
+        </div>
+
+        <!-- Start Screen Overlay -->
+        <div id="start-screen" class="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-20 p-8">
+            <h1 class="text-6xl font-black text-white mb-4">Fruit Catcher</h1>
+            <p class="text-xl text-gray-200 mb-8 text-center">Catch the fruits, avoid the bombs!</p>
+            <p class="text-lg text-gray-300 mb-2">Controls:</p>
+            <p class="text-gray-300 mb-8">← / → Arrow Keys or Drag on Screen</p>
+            <button id="start-button" class="bg-green-500 text-white text-2xl font-bold py-4 px-10 rounded-lg shadow-xl hover:bg-green-600 transition transform hover:scale-105">
+                Start Game
+            </button>
+            <div class="mt-4 text-gray-400 text-sm">Loading High Score...</div>
+        </div>
+
+        <!-- Pause Screen Overlay -->
+        <div id="pause-screen" class="absolute inset-0 bg-black/70 flex-col items-center justify-center z-20 p-8 hidden">
+            <h1 class="text-6xl font-black text-white mb-8">Paused</h1>
+            <button id="resume-button" class="bg-green-500 text-white text-2xl font-bold py-4 px-10 rounded-lg shadow-xl hover:bg-green-600 transition transform hover:scale-105">
+                Resume
+            </button>
+        </div>
+
+        <!-- Game Over Screen Overlay -->
+        <div id="game-over-screen" class="absolute inset-0 bg-black/70 flex-col items-center justify-center z-20 p-8 hidden">
+            <h1 class="text-6xl font-black text-red-500 mb-4">Game Over</h1>
+            <p class="text-3xl text-white mb-4" id="final-score">Your Score: 0</p>
+            <p class="text-2xl text-yellow-400 mb-8" id="final-highscore">New High Score!</p>
+            <button id="restart-button" class="bg-blue-500 text-white text-2xl font-bold py-4 px-10 rounded-lg shadow-xl hover:bg-blue-600 transition transform hover:scale-105">
+                Play Again
+            </button>
+        </div>
+
+    </div>
+
+    <!-- 4. Firebase SDKs -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase Config ---
+        // These global variables are provided by the environment.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'fruit-catcher-demo';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "DEMO", authDomain: "DEMO.firebaseapp.com", projectId: "DEMO" };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- Firebase Initialization ---
+        let app, auth, db, userId, highScoreRef;
+        let isAuthReady = false;
+
+        async function initFirebase() {
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        // Path for user-specific high score
+                        const userHighScorePath = `/artifacts/${appId}/users/${userId}/fruit-catcher-score/scoreData`;
+                        highScoreRef = doc(db, userHighScorePath);
+                        attachHighScoreListener();
+                    } else {
+                        // No user, try to sign in
+                        await signIn();
+                    }
+                    isAuthReady = true;
+                });
+
+            } catch (e) {
+                console.error("Error initializing Firebase:", e);
+            }
+        }
+
+        async function signIn() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Firebase sign-in failed:", error);
+            }
+        }
+
+        function attachHighScoreListener() {
+            if (!highScoreRef) return;
+            
+            // Listen for realtime updates to the high score
+            onSnapshot(highScoreRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    highScore = docSnap.data().score;
+                } else {
+                    highScore = 0;
+                }
+                updateHighScoreDisplay();
+                // Update start screen message
+                const startScreenMsg = document.querySelector("#start-screen .text-gray-400");
+                if (startScreenMsg) {
+                    startScreenMsg.textContent = `Your High Score: ${highScore}`;
+                }
+            }, (error) => {
+                console.error("Error listening to high score:", error);
+            });
+        }
+
+        async function saveHighScore(newScore) {
+            if (!highScoreRef || newScore <= highScore) return;
+            try {
+                // Set the high score
+                await setDoc(highScoreRef, { score: newScore });
+                // The onSnapshot listener will update the 'highScore' variable
+            } catch (e) {
+                console.error("Error saving high score:", e);
+            }
+        }
+
+        // --- DOM Elements ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const hud = document.getElementById('hud');
+        const controls = document.getElementById('controls');
+        const scoreDisplay = document.getElementById('score-display');
+        const livesDisplay = document.getElementById('lives-display');
+        const highscoreDisplay = document.getElementById('highscore-display');
+        
+        const startScreen = document.getElementById('start-screen');
+        const pauseScreen = document.getElementById('pause-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const soundButton = document.getElementById('sound-button');
+        
+        const finalScoreDisplay = document.getElementById('final-score');
+        const finalHighscoreDisplay = document.getElementById('final-highscore');
+
+        // --- Game State ---
+        let gameState = 'start'; // 'start', 'playing', 'paused', 'over'
+        let score = 0;
+        let highScore = 0;
+        let lives = 3;
+
+        let basket = { x: 0, y: 0, width: 80, height: 40 };
+        let fallingObjects = [];
+        let objectSize = 40;
+        
+        // Difficulty
+        let baseSpeed = 2;
+        let speedMultiplier = 1;
+        let spawnRate = 1000; // ms
+        let difficultyTimer;
+
+        // Controls
+        let rightPressed = false;
+        let leftPressed = false;
+
+        // Timers/Intervals
+        let gameLoopInterval;
+        let spawnInterval;
+        
+        // --- Sound ---
+        let soundOn = true;
+        let synth, bombSynth, gameOverSynth;
+
+        function initSounds() {
+            // Ensure sounds are initialized after a user interaction (e.g., start button click)
+            if (Tone.context.state !== 'running') {
+                Tone.start();
+            }
+            
+            // Sound for catching fruit
+            synth = new Tone.Synth({
+                oscillator: { type: 'sine' },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.2 }
+            }).toDestination();
+
+            // Sound for hitting a bomb
+            bombSynth = new Tone.Synth({
+                oscillator: { type: 'square' },
+                envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 }
+            }).toDestination();
+            
+            // Sound for game over
+            gameOverSynth = new Tone.PolySynth(Tone.Synth, {
+                envelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.5 }
+            }).toDestination();
+        }
+
+        function playSound(type) {
+            if (!soundOn || !synth) return;
+            try {
+                if (type === 'catch') {
+                    synth.triggerAttackRelease('C5', '8n');
+                } else if (type === 'bomb') {
+                    bombSynth.triggerAttackRelease('G2', '4n');
+                } else if (type === 'over') {
+                    const now = Tone.now();
+                    gameOverSynth.triggerAttackRelease(['C4', 'G3', 'E3'], '2n', now);
+                }
+            } catch (e) {
+                console.warn("Sound playback error:", e);
+            }
+        }
+
+        // --- Game Setup ---
+        function resizeCanvas() {
+            const container = document.getElementById('game-container');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            
+            // Update basket position
+            basket.y = canvas.height - basket.height - 20;
+            if (!basket.x) { // Initial placement
+                 basket.x = (canvas.width - basket.width) / 2;
+            }
+            objectSize = Math.max(20, Math.min(40, canvas.width / 15));
+            basket.width = objectSize * 2.5; /* <-- I changed this from 2 to 2.5 */
+            basket.height = objectSize;
+            ctx.font = `${objectSize}px Arial`; // Set font size for emojis
+        }
+
+        function init() {
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Keyboard controls
+            document.addEventListener('keydown', keyDownHandler);
+            document.addEventListener('keyup', keyUpHandler);
+            
+            // Touch controls
+            canvas.addEventListener('touchstart', touchHandler, { passive: false });
+            canvas.addEventListener('touchmove', touchHandler, { passive: false });
+            
+            // Button Listeners
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', startGame);
+            pauseButton.addEventListener('click', togglePause);
+            resumeButton.addEventListener('click', togglePause);
+            soundButton.addEventListener('click', toggleSound);
+
+            // Initialize Firebase
+            initFirebase();
+            
+            // Start in the 'start' state
+            showScreen('start');
+        }
+
+        function showScreen(screen) {
+            // Hide all
+            startScreen.classList.add('hidden');
+            startScreen.classList.remove('flex');
+            pauseScreen.classList.add('hidden');
+            pauseScreen.classList.remove('flex');
+            gameOverScreen.classList.add('hidden');
+            gameOverScreen.classList.remove('flex');
+            hud.classList.add('hidden');
+            controls.classList.add('hidden');
+            
+            if (screen === 'start') {
+                startScreen.classList.remove('hidden');
+                startScreen.classList.add('flex');
+            } else if (screen === 'playing') {
+                hud.classList.remove('hidden');
+                controls.classList.remove('hidden');
+            } else if (screen === 'pause') {
+                hud.classList.remove('hidden');
+                controls.classList.remove('hidden');
+                pauseScreen.classList.remove('hidden');
+                pauseScreen.classList.add('flex');
+            } else if (screen === 'over') {
+                gameOverScreen.classList.remove('hidden');
+                gameOverScreen.classList.add('flex');
+            }
+        }
+        
+        function startGame() {
+            // Initialize sounds on first user interaction
+            if (Tone.context.state !== 'running') {
+                initSounds();
+            }
+
+            score = 0;
+            lives = 3;
+            speedMultiplier = 1;
+            baseSpeed = canvas.height / 300; // Scale speed with canvas height
+            spawnRate = 1000;
+            fallingObjects = [];
+            
+            updateScoreDisplay();
+            updateLivesDisplay();
+            updateHighScoreDisplay();
+            
+            gameState = 'playing';
+            showScreen('playing');
+            
+            // Clear any existing intervals
+            clearInterval(gameLoopInterval);
+            clearInterval(spawnInterval);
+            clearInterval(difficultyTimer);
+            
+            // Start game loops
+            gameLoopInterval = setInterval(gameLoop, 1000 / 60); // 60 FPS
+            spawnInterval = setInterval(spawnObject, spawnRate);
+            difficultyTimer = setInterval(increaseDifficulty, 5000); // Increase difficulty every 5s
+        }
+
+        function gameOver() {
+            gameState = 'over';
+            showScreen('over');
+            
+            clearInterval(gameLoopInterval);
+            clearInterval(spawnInterval);
+            clearInterval(difficultyTimer);
+            
+            finalScoreDisplay.textContent = `Your Score: ${score}`;
+            if (score > highScore) {
+                finalHighscoreDisplay.textContent = "New High Score!";
+                finalHighscoreDisplay.classList.remove('hidden');
+                saveHighScore(score); // Save to Firestore
+            } else {
+                finalHighscoreDisplay.classList.add('hidden');
+            }
+            playSound('over');
+        }
+
+        function togglePause() {
+            if (gameState === 'playing') {
+                gameState = 'paused';
+                showScreen('pause');
+                pauseButton.textContent = '▶';
+                // Stop intervals
+                clearInterval(spawnInterval);
+                clearInterval(difficultyTimer);
+            } else if (gameState === 'paused') {
+                gameState = 'playing';
+                showScreen('playing');
+                pauseButton.textContent = '||';
+                // Restart intervals
+                spawnInterval = setInterval(spawnObject, spawnRate);
+                difficultyTimer = setInterval(increaseDifficulty, 5000);
+            }
+        }
+        
+        function toggleSound() {
+            soundOn = !soundOn;
+            soundButton.textContent = soundOn ? '🔊' : '🔇';
+        }
+
+        // --- Game Loop ---
+
+        function gameLoop() {
+            if (gameState !== 'playing') return;
+            
+            update();
+            draw();
+        }
+
+        function update() {
+            // Move basket
+            if (rightPressed && basket.x < canvas.width - basket.width) {
+                basket.x += 7;
+            } else if (leftPressed && basket.x > 0) {
+                basket.x -= 7;
+            }
+            
+            // Move objects
+            for (let i = fallingObjects.length - 1; i >= 0; i--) {
+                let obj = fallingObjects[i];
+                obj.y += obj.speed;
+                
+                // Check for collision with basket
+                if (
+                    obj.y + objectSize > basket.y &&
+                    obj.y < basket.y + basket.height &&
+                    obj.x + objectSize > basket.x &&
+                    obj.x < basket.x + basket.width
+                ) {
+                    if (obj.type === 'fruit') {
+                        score += obj.points;
+                        updateScoreDisplay();
+                        playSound('catch');
+                    } else if (obj.type === 'bomb') {
+                        lives--;
+                        updateLivesDisplay();
+                        playSound('bomb');
+                        if (lives <= 0) {
+                            gameOver();
+                        }
+                    }
+                    fallingObjects.splice(i, 1); // Remove object
+                }
+                // Check if missed
+                else if (obj.y > canvas.height) {
+                    if (obj.type === 'fruit') {
+                        lives--;
+                        updateLivesDisplay();
+                        if (lives <= 0) {
+                            gameOver();
+                        }
+                    }
+                    fallingObjects.splice(i, 1); // Remove object
+                }
+            }
+        }
+
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw basket
+            ctx.font = `${basket.width / 2}px Arial`; // Adjust emoji size to basket
+            ctx.fillText('🧺', basket.x, basket.y + basket.height * 0.9);
+            
+            // Draw falling objects
+            ctx.font = `${objectSize}px Arial`;
+            for (const obj of fallingObjects) {
+                ctx.fillText(obj.emoji, obj.x, obj.y + objectSize * 0.8);
+            }
+        }
+
+        // --- Object & Difficulty ---
+
+        function spawnObject() {
+            if (gameState !== 'playing') return;
+            
+            const x = Math.random() * (canvas.width - objectSize);
+            const speed = (baseSpeed + Math.random() * 2) * speedMultiplier;
+            
+            let type, emoji, points;
+            const rand = Math.random();
+            
+            if (rand < 0.2) { // 20% chance of bomb
+                type = 'bomb';
+                emoji = '💣';
+                points = 0;
+            } else { // 80% chance of fruit
+                type = 'fruit';
+                const fruitRand = Math.random();
+                if (fruitRand < 0.4) {
+                    emoji = '🍎'; points = 10;
+                } else if (fruitRand < 0.7) {
+                    emoji = '🍌'; points = 15;
+                } else {
+                    emoji = '🍓'; points = 20;
+                }
+            }
+            
+            fallingObjects.push({ x, y: -objectSize, speed, type, emoji, points });
+        }
+        
+        function increaseDifficulty() {
+            if (gameState !== 'playing') return;
+
+            speedMultiplier += 0.05; // Increase speed
+            
+            if (spawnRate > 300) { // Cap spawn rate
+                spawnRate -= 50;
+                clearInterval(spawnInterval);
+                spawnInterval = setInterval(spawnObject, spawnRate);
+            }
+        }
+
+        // --- UI Updates ---
+        
+        function updateScoreDisplay() {
+            scoreDisplay.textContent = `Score: ${score}`;
+        }
+        
+        function updateLivesDisplay() {
+            livesDisplay.textContent = '❤️'.repeat(lives) + '🖤'.repeat(3 - lives);
+        }
+        
+        function updateHighScoreDisplay() {
+            highscoreDisplay.textContent = `High: ${highScore}`;
+        }
+
+        // --- Control Handlers ---
+
+        function keyDownHandler(e) {
+            if (e.key === 'Right' || e.key === 'ArrowRight') {
+                rightPressed = true;
+            } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                leftPressed = true;
+            } else if ((e.key === 'p' || e.key === 'P') && (gameState === 'playing' || gameState === 'paused')) {
+                togglePause();
+            } else if (e.key === ' ' && gameState === 'start') {
+                startGame();
+            } else if (e.key === ' ' && gameState === 'over') {
+                startGame();
+            }
+        }
+        
+        function keyUpHandler(e) {
+            if (e.key === 'Right' || e.key === 'ArrowRight') {
+                rightPressed = false;
+            } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                leftPressed = false;
+            }
+        }
+        
+        function touchHandler(e) {
+            if (gameState !== 'playing') return;
+            
+            e.preventDefault(); // Prevent scrolling
+            const touchX = e.touches[0].clientX - canvas.getBoundingClientRect().left;
+            
+            // Center basket on touch
+            let newX = touchX - basket.width / 2;
+            
+            // Clamp basket position within canvas
+            if (newX < 0) newX = 0;
+            if (newX > canvas.width - basket.width) newX = canvas.width - basket.width;
+            
+            basket.x = newX;
+        }
+
+        // --- Start ---
+        document.addEventListener('DOMContentLoaded', init);
+
+    </script>
+</body>
+</html>
