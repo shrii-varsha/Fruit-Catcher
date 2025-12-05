@@ -44,16 +44,10 @@ A fun and beginner-friendly **casual game** where players catch falling fruits, 
 
 ---
 
-## 📸 Screenshots (Optional)
-
-(Add images here once available.)
-
----
-
 ## 🛠️ Technologies Used
 
 * HTML, CSS, JavaScript 
-* Audio & sprite assets
+* Audio 
 
 ---
 
@@ -64,8 +58,3 @@ For major changes, please open an issue first to discuss what you’d like to ad
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
